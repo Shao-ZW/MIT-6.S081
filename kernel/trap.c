@@ -89,40 +89,46 @@ usertrap(void)
 
       p->passed_ticks = 0;
 
-      p->epc = trapframe->epc;
-      p->ra = trapframe->ra;
-      p->sp = trapframe->sp;
-      p->gp = trapframe->gp;
-      p->tp = trapframe->tp;
-      p->t0 = trapframe->t0;
-      p->t1 = trapframe->t1;
-      p->t2 = trapframe->t2;
-      p->s0 = trapframe->s0;
-      p->s1 = trapframe->s1;
-      p->a0 = trapframe->a0;
-      p->a1 = trapframe->a1;
-      p->a2 = trapframe->a2;
-      p->a3 = trapframe->a3;  
-      p->a4 = trapframe->a4;
-      p->a5 = trapframe->a5;
-      p->a6 = trapframe->a6;
-      p->a7 = trapframe->a7;
-      p->s2 = trapframe->s2;
-      p->s3 = trapframe->s3;
-      p->s4 = trapframe->s4;
-      p->s5 = trapframe->s5;
-      p->s6 = trapframe->s6;
-      p->s7 = trapframe->s7;
-      p->s8 = trapframe->s8;
-      p->s9 = trapframe->s9;
-      p->s10 = trapframe->s10;
-      p->s11 = trapframe->s11;
-      p->t3 = trapframe->t3;
-      p->t4 = trapframe->t4;
-      p->t5 = trapframe->t5;
-      p->t6 = trapframe->t6;
+      if(!p->handler_lock)
+      {
+        p->handler_lock = 1;
 
-      trapframe->epc = p->handler;
+        p->epc = trapframe->epc;
+        p->ra = trapframe->ra;
+        p->sp = trapframe->sp;
+        p->gp = trapframe->gp;
+        p->tp = trapframe->tp;
+        p->t0 = trapframe->t0;
+        p->t1 = trapframe->t1;
+        p->t2 = trapframe->t2;
+        p->s0 = trapframe->s0;
+        p->s1 = trapframe->s1;
+        p->a0 = trapframe->a0;
+        p->a1 = trapframe->a1;
+        p->a2 = trapframe->a2;
+        p->a3 = trapframe->a3;  
+        p->a4 = trapframe->a4;
+        p->a5 = trapframe->a5;
+        p->a6 = trapframe->a6;
+        p->a7 = trapframe->a7;
+        p->s2 = trapframe->s2;
+        p->s3 = trapframe->s3;
+        p->s4 = trapframe->s4;
+        p->s5 = trapframe->s5;
+        p->s6 = trapframe->s6;
+        p->s7 = trapframe->s7;
+        p->s8 = trapframe->s8;
+        p->s9 = trapframe->s9;
+        p->s10 = trapframe->s10;
+        p->s11 = trapframe->s11;
+        p->t3 = trapframe->t3;
+        p->t4 = trapframe->t4;
+        p->t5 = trapframe->t5;
+        p->t6 = trapframe->t6;
+
+        trapframe->epc = p->handler;
+      }
+      
     }
   }
 

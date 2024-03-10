@@ -122,6 +122,7 @@ sys_sigreturn(void)
   struct proc *p = myproc();
   struct trapframe *trapframe = p->trapframe;
 
+  p->handler_lock = 0;
   trapframe->epc = p->epc;
   trapframe->ra = p->ra;
   trapframe->sp = p->sp;

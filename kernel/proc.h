@@ -110,7 +110,8 @@ struct proc {
   int alarm_interval;
   uint64 handler;
   int passed_ticks;
- 
+  int handler_lock;   //important
+
   uint64 epc;
   uint64 ra;
   uint64 sp;

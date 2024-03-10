@@ -142,6 +142,7 @@ found:
   p->context.sp = p->kstack + PGSIZE;
 
   p->passed_ticks = 0;
+  p->handler_lock = 0;
 
   return p;
 }
