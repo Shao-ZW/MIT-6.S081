@@ -9,6 +9,8 @@
 #include "riscv.h"
 #include "defs.h"
 
+#define MAXSTEALPG 128  //max number of page could steal from one cpu
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -75,12 +77,22 @@ steal(int hart)
     if(i == hart) 
       continue;
     acquire(&kmem.lock[i]);
-    if(kmem.freelist[i]){
-      struct run *r = kmem.freelist[i];
-      kmem.freelist[i] = r->next;
+
+    int cnt_steal = 0;
+    struct run *r = kmem.freelist[i];
+
+    if(r){
+      while(r->next && cnt_steal < MAXSTEALPG){
+        r = r->next;
+        cnt_steal++;
+      }
+    
+      struct run *r_next = r->next;
       r->next = kmem.freelist[hart];
-      kmem.freelist[hart] = r;
+      kmem.freelist[hart] = kmem.freelist[i];
+      kmem.freelist[i] = r_next;
     }
+    
     release(&kmem.lock[i]);
   }
 }
