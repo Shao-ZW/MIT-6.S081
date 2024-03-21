@@ -23,7 +23,7 @@
 #include "fs.h"
 #include "buf.h"
 
-#define NBUCKET 13
+#define NBUCKET 17
 struct {
   struct spinlock evict_lk;
   struct buf buf[NBUF];
@@ -55,8 +55,6 @@ binit(void)
     b->timestamp = 0;
     initsleeplock(&b->lock, "buffer");
   }
-
-  
 }
 
 // Look through buffer cache for block on device dev.
@@ -82,12 +80,14 @@ bget(uint dev, uint blockno)
 
   // Not cached. Get evict lock and check again
   acquire(&bcache.evict_lk);
-  acquire(&bcache.bucket_lk[bucket_id]);
+
+  //acquire(&bcache.bucket_lk[bucket_id]); //Reduce the granularity of locks
   for(b = bcache.bucket[bucket_id].next; b != &bcache.bucket[bucket_id]; b = b->next){
     if(b->dev == dev && b->blockno == blockno){
+      acquire(&bcache.bucket_lk[bucket_id]);
       b->refcnt++;
-      release(&bcache.evict_lk);
       release(&bcache.bucket_lk[bucket_id]);
+      release(&bcache.evict_lk);
       acquiresleep(&b->lock);
       return b;
     }
@@ -119,6 +119,8 @@ bget(uint dev, uint blockno)
   }
 
   if(evict){
+      acquire(&bcache.bucket_lk[bucket_id]);
+
       evict->dev = dev;
       evict->blockno = blockno;
       evict->valid = 0;
@@ -131,9 +133,9 @@ bget(uint dev, uint blockno)
       bcache.bucket[bucket_id].next->prev = evict;
       bcache.bucket[bucket_id].next = evict;
 
-      release(&bcache.evict_lk);
       release(&bcache.bucket_lk[bucket_id]);
       release(&bcache.bucket_lk[evict_bucket_id]);
+      release(&bcache.evict_lk);
       acquiresleep(&evict->lock);
       return evict;
   }
