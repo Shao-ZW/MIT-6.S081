@@ -283,6 +283,30 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
+// Caller must hold ip->lock.
+#define MAXDEPTH 10
+
+struct inode*
+follow(struct inode* ip, int depth)
+{
+  if(ip->type != T_SYMLINK)
+    return ip;
+  if(depth > MAXDEPTH){
+    iunlockput(ip);
+    return 0;
+  }
+  
+  char path[MAXPATH];
+  if(readi(ip, 0, (uint64)path, 0, MAXPATH) != MAXPATH)
+    panic("follow: readi");
+  iunlockput(ip);
+
+  if((ip = namei(path)) == 0)
+    return 0;
+  ilock(ip);
+  return follow(ip, depth + 1);
+}
+
 uint64
 sys_open(void)
 {
@@ -322,6 +346,14 @@ sys_open(void)
     return -1;
   }
 
+  if(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)){
+    ip = follow(ip, 0);
+    if(ip == 0){
+      end_op();
+      return -1;
+    }
+  }
+  
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
       fileclose(f);
@@ -483,4 +515,30 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64
+sys_symlink(void)
+{
+  char new[MAXPATH], old[MAXPATH];
+  struct inode *ip;
+
+  if(argstr(0, old, MAXPATH) < 0 || argstr(1, new, MAXPATH) < 0)
+    return -1;
+
+  begin_op();
+  ip = create(new, T_SYMLINK, 0, 0);
+  if(ip == 0)
+    goto bad;
+
+  if(writei(ip, 0, (uint64)old, 0, MAXPATH) != MAXPATH)
+    panic("sys_symlink: writei");
+
+  iunlockput(ip);
+  end_op();
+  return 0;
+
+bad:
+  end_op();
+  return -1;
 }
