@@ -15,7 +15,12 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
+extern struct {
+  struct spinlock lock;
+  struct file file[NFILE];
+} ftable;
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
 static int
@@ -481,6 +486,139 @@ sys_pipe(void)
     fileclose(rf);
     fileclose(wf);
     return -1;
+  }
+  return 0;
+}
+
+uint64
+sys_mmap(void)
+{
+  uint64 addr;
+  int len, offset, prot, flags;
+  struct file *f;
+  struct vma *vp = 0, *tp;
+  struct proc *p = myproc();
+  
+  if(argaddr(0, &addr) < 0)
+    return -1;
+  if(argint(1, &len) < 0 || argint(2, &prot) || argint(3, &flags) || argint(5, &offset) < 0)
+    return -1;
+  if(argfd(4, 0, &f) < 0)
+    return -1;
+  
+  //I am too lazy to handle other case
+  if(len % PGSIZE != 0 || offset % BSIZE != 0)
+    return -1;
+  
+  if((prot & PROT_WRITE) && !f->writable && !(flags == MAP_PRIVATE))
+    return -1;
+  
+  for(int i = 0; i < NVMA; ++i){
+    if(!p->vma[i].valid){
+      vp = &p->vma[i];
+      break;
+    }
+  }
+
+  if(!vp)
+    return -1;
+  
+  //find free contiguous vm area bigger than len and insert into linked list
+  for(tp = p->vma_head.next; tp && tp->next; tp = tp->next){
+    if(tp->next->start - tp->end >= len){
+      vp->valid = 1;
+      vp->start = tp->end;
+      //insert into linked list
+      vp->prev = tp;
+      vp->next = tp->next;
+      tp->next->prev = vp;
+      tp->next = vp;
+      break;
+    }
+  }
+  //can't find the free vm area inside linked list 
+  if(!vp->valid){
+    if(tp)
+      vp->start = tp->end;
+    else
+      vp->start = PGROUNDUP(p->sz);
+
+    if(vp->start + len > TRAPFRAME)
+      return -1;
+    //insert into linked list
+    if(tp){
+      vp->next = tp->next;
+      vp->prev = tp;
+      tp->next = vp;  
+    } else {
+      vp->prev = &p->vma_head;
+      vp->next = p->vma_head.next;
+      p->vma_head.next = vp;
+    }
+  }
+
+  vp->valid = 1;
+  vp->end = vp->start + len;
+  vp->file = f;
+  vp->flags = flags;
+  vp->offset = offset;
+  vp->prot = prot;
+  vp->unmapsize = 0;
+
+  acquire(&ftable.lock);
+  f->ref++;
+  release(&ftable.lock);
+
+  return vp->start;
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr, va;
+  int len;
+  struct vma *vp;
+  struct proc *p = myproc();
+
+  if(argaddr(0, &addr) < 0)
+    return -1;
+  if(argint(1, &len) < 0)
+    return -1;
+
+  //I am too lazy to handle other case!
+  if(addr % PGSIZE != 0 || len % PGSIZE != 0)
+    return -1;
+  
+  for(vp = p->vma_head.next; vp; vp = vp->next){
+    if(vp->start <= addr && vp->end >= addr + len)
+      break;
+  }
+  if(!vp)
+    return -1;
+  
+  for(va = addr; va < addr + len; va += PGSIZE){
+    pte_t *pte = walk(p->pagetable, va, 0);
+    if((*pte & PTE_D) && vp->flags == MAP_SHARED){
+      begin_op();
+      ilock(vp->file->ip);
+      if ((writei(vp->file->ip, 1, va, vp->offset + va - vp->start, PGSIZE)) != PGSIZE)
+        return -1;
+      iunlock(vp->file->ip);
+      end_op();
+    }
+    if(*pte && (*pte & PTE_V) && (*pte & PTE_U))
+      uvmunmap(p->pagetable, va, 1, 1);
+    vp->unmapsize += PGSIZE;
+  }
+
+  if(vp->unmapsize == vp->end - vp->start){
+    acquire(&ftable.lock);
+    vp->file->ref--;
+    release(&ftable.lock);
+    vp->valid = 0;
+    vp->prev->next = vp->next;
+    if(vp->next)
+      vp->next->prev = vp->prev;
   }
   return 0;
 }

@@ -5,6 +5,15 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
+
+extern struct {
+  struct spinlock lock;
+  struct file file[NFILE];
+} ftable;
 
 struct cpu cpus[NCPU];
 
@@ -295,6 +304,18 @@ fork(void)
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
 
+  // copy vma 
+  // add ref of file
+  for(int i = 0; i < NVMA; ++i){
+    np->vma[i] = p->vma[i];
+    if(p->vma[i].valid){
+      acquire(&ftable.lock);
+      p->vma[i].file->ref++;
+      release(&ftable.lock);
+    }
+  }
+  np->vma_head = p->vma_head;
+  
   // increment reference counts on open file descriptors.
   for(i = 0; i < NOFILE; i++)
     if(p->ofile[i])
@@ -340,9 +361,31 @@ void
 exit(int status)
 {
   struct proc *p = myproc();
+  struct vma *vp;
 
   if(p == initproc)
     panic("init exiting");
+
+  for(vp = p->vma_head.next; vp; vp = vp->next){
+    for(uint64 va = vp->start; va < vp->end; va += PGSIZE){
+      pte_t *pte = walk(p->pagetable, va, 0);
+      if((*pte & PTE_D) && vp->flags == MAP_SHARED){
+        begin_op();
+        ilock(vp->file->ip);
+        if ((writei(vp->file->ip, 1, va, vp->offset + va - vp->start, PGSIZE)) != PGSIZE)
+          panic("exit: writei");
+        iunlock(vp->file->ip);
+        end_op();
+      }
+      if(*pte && (*pte & PTE_V) && (*pte & PTE_U))
+        uvmunmap(p->pagetable, va, 1, 1);
+    }
+    vp->valid = 0;
+    acquire(&ftable.lock);
+    vp->file->ref--;
+    release(&ftable.lock);
+  }
+  p->vma_head.next = 0;
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
@@ -445,6 +488,7 @@ scheduler(void)
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
 
+    int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
@@ -458,8 +502,14 @@ scheduler(void)
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
+        found = 1;
       }
       release(&p->lock);
+    }
+
+    if(found == 0){
+      intr_on();
+      asm volatile("wfi");
     }
   }
 }
